@@ -1,89 +1,207 @@
-# Chart-Generation-Agentic-Workflow-Reflection-
-A multi-modal LLM will review the first draft chart, identify potential improvements—such as chart type, labels, or color choices and then rewrite the chart generation code to produce a more effective visualization.
+# Reflective Research Agent (FastAPI + Postgres, single container)
 
-The steps that the workflow will carry out are:
-Generate an initial version (V1): Use a Large Language Model (LLM) to create the first version of the plotting code.
-Execute code and create chart: Run the generated code and display the resulting chart. ** (check everywhere)
-Reflect on the output: Evaluate both the code and the chart using an LLM to detect areas for improvement (e.g., clarity, accuracy, design).
-Generate and execute improved version (V2): Produce a refined version of the plotting code based on reflection insights and render the enhanced chart.
-<img width="994" height="385" alt="image" src="https://github.com/user-attachments/assets/87a5799d-a68f-40c4-b23c-c4100dc3420d" />
+A FastAPI web app that plans a research workflow, runs tool-using agents (Tavily, arXiv, Wikipedia), and stores task state/results in Postgres.
+This repo includes a Docker setup that runs **Postgres + the API in one container** (for local/dev).
 
-Reflection pattern in code and used it to improve a data visualization.
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-1. Setup: Initialize environment and client
-In this step, you import the key libraries that will support the workflow:
+## Features
 
-re: Python’s regular expression module, which you’ll use to extract snippets of code or structured text from the LLM’s output.
-json: Provides functions to read and write JSON, useful for handling structured responses returned by the LLM.
-utils: A custom helper module provided. It includes utility functions to work with the dataset, generate charts, and display results in a clean, readable format.
+* `/` serves a simple UI (Jinja2 template) to kick off a research task.
+* `/generate_report` kicks off a threaded, multi-step agent workflow (planner → research/writer/editor).
+* `/task_progress/{task_id}` live status for each step/substep.
+* `/task_status/{task_id}` final status + report.
 
-2. Loading the dataset
-You’ll build an agentic workflow that generates data visualizations from this dataset, helping you answer questions about coffee sales from the vending machine.
+---
 
-3.Building the pipeline
-Step 1 — Generate Code to Create a Chart (V1)
-In this step, you’ll prompt an LLM to write Python code that generates a chart in response to a user query about the coffee dataset. The dataset includes fields such as date, coffee_type, quantity, and revenue, and you will pass this schema into the LLM so it knows what data is available.
-The question you’ll ask the model is the same one used in the lecture:
-“Create a plot comparing Q1 coffee sales in 2024 and 2025 using the data in coffee_sales.csv.”
-The LLM’s output will be Python code using the matplotlib library. Instead of displaying the chart directly, the code will be written between <execute_python> tags so it can be extracted and run in later steps. 
+## Project layout (key paths)
 
-Step 2 — Execute Code and Create Chart
-In this step, you’ll use a regular expression to extract the Python code that the LLM generated in the previous step (the part written between <execute_python> tags). Once extracted, you’ll run this code to produce the first draft chart.
-Here's how it works:
-Extract the code:
-A regex pattern is used to grab the code that’s wrapped inside the <execute_python> tags.
-Execute the code: The extracted code is run in a predefined global context where the DataFrame df is already available. This means your code can directly use df without needing to reload the dataset.
-Generate the chart:: If the code executes successfully, it will create a chart and save it as chart_v1.png.
-View the chart in the notebook: The saved chart is then displayed inline using utils.print_html, making it easy for you to review the results.
-By completing this step, you’ll have your first draft visualization (V1) ready — a big milestone in the reflection workflow!
+```
+.
+├─ main.py                      # FastAPI app (your file shown above)
+├─ src/
+│  ├─ planning_agent.py         # planner_agent(), executor_agent_step()
+│  ├─ agents.py                 # research_agent, writer_agent, editor_agent  (example)
+│  └─ research_tools.py         # tavily_search_tool, arxiv_search_tool, wikipedia_search_tool
+├─ templates/
+│  └─ index.html                # UI page rendered by "/"
+├─ static/                      # optional static assets (css/js)
+├─ docker/
+│  └─ entrypoint.sh             # starts Postgres, prepares DB, then launches Uvicorn
+├─ requirements.txt
+├─ Dockerfile
+└─ README.md
+```
 
-Step 3 — Reflect on the output
-The goal here is to simulate how a human would review a first draft of a chart—looking for strengths, weaknesses, and areas for improvement.
-Here’s what happens:
-1. Provide the chart to the LLM: The generated chart (chart_v1.png) is shared with the LLM so it can “see” the visualization.
-2. Analyze the chart visually: The LLM reviews elements like clarity, labeling, accuracy, and overall readability.
-3. Generate feedback: The LLM suggests improvements—for example, fixing axis labels, adjusting the chart type, improving color choices, or highlighting missing legends.
-By doing this, you create an intelligent feedback loop where the chart is not just produced once, but actively critiqued—setting the stage for a stronger second version (V2).
-Note that, the model is instructed to return its response in JSON format.
+> Make sure `templates/index.html` and (optionally) `static/` exist and are copied into the image.
 
-JSON is a lightweight, structured format (key–value pairs) that makes it easy to parse the LLM’s output programmatically.
-Here, we require two fields:
-feedback: a short critique of the current chart.
-refined_code: an improved Python code snippet wrapped in <execute_python> tags.
-We also include a “constraints” section in the prompt. These rules (e.g., use matplotlib only, save the file to a specific path, call plt.close() at the end) help the model generate consistent, runnable code that fits the workflow. Without these constraints, the output might vary too much or include unwanted formatting.
+---
 
-Step 4 — Generate and Execute Improved Version (V2)
-In this final step, it’s time to generate and run the improved version of the chart (V2).
-After running the cell, you’ll see both the reflection written by the LLM (explaining what needed improvement) and the new code it generated. The new code will then be executed to produce the updated chart.
-Now you’ll execute the refined code returned by the reflection step. The code inside the <execute_python> tags is extracted, run against the dataset, and used to generate the updated chart.
+## Prerequisites
 
-If the execution is successful, you’ll see the new image (chart_v2.png) displayed below as the Regenerated Chart (V2).
+* **Docker** (Desktop on Windows/macOS, or engine on Linux).
 
-Put it all together — creating the end-to-end workflow
-Now it’s time to wrap everything into a single automated workflow the agent can run from start to finish.
 
-The run_workflow function links together the components you implemented earlier:
+* API keys stored in a `.env` file:
 
-1) Load and prepare data — via utils.load_and_prepare_data(...). 2) Generate V1 code — with generate_chart_code(...), which returns the first-draft matplotlib code (wrapped in <execute_python> tags).
-3) Execute V1 immediately — the workflow extracts the code between <execute_python> tags and runs it to produce the first chart image.
-4) Reflect and refine — reflect_on_image_and_regenerate(...) critiques the V1 image (and the original code) against the instruction, returns concise feedback plus revised code (V2). 5) Execute V2 immediately — the refined code is extracted and executed to generate the improved chart.
+  ```
+  OPENAI_API_KEY=your-open-api-key
+  TAVILY_API_KEY=your-tavily-api-key
+  ```
 
-What this workflow accepts
-dataset_path: location of the input CSV.
-user_instructions: the chart request (e.g., “Create a plot comparing Q1 coffee sales in 2024 and 2025 using the data in coffee_sales.csv.”).
-generation_model: model used for the initial code generation.
-reflection_model: model used for the image-based reflection and code refinement.
-image_basename: base filename for saving chart images (e.g., chart_v1.png, chart_v2.png).
+* Python deps are installed by Docker from `requirements.txt`:
 
-Choosing models
-You can mix and match different models for generation and reflection. For example:
+  * `fastapi`, `uvicorn`, `sqlalchemy`, `python-dotenv`, `jinja2`, `requests`, `wikipedia`, etc.
+  * Plus any libs used by your `aisuite` client.
 
-Use a fast model for initial code generation (gpt-4.1-mini or gpt-3.5-turbo).
-Use a stronger reasoning model for reflection (gpt-4.1 or claude-3-7-sonnet-latest).
-This flexibility lets you explore trade-offs between speed and quality.
+---
 
-Final Takeaways:
-Generate an initial chart (V1).
-Critique and refine it into a better version (V2).
-Automate the full workflow with different models.
-The key idea: reflection helps you create clearer, more accurate, and more effective visualizations.
+## Environment variables
+
+The app **reads only `DATABASE_URL`** at startup.
+
+* The container’s entrypoint sets a sane default for local dev:
+
+  ```
+  postgresql://app:local@127.0.0.1:5432/appdb
+  ```
+* To use Tavily:
+
+  * Provide `TAVILY_API_KEY` (via `.env` or `-e`).
+
+Optional (if you want to override defaults done by the entrypoint):
+
+* `POSTGRES_USER` (default `app`)
+* `POSTGRES_PASSWORD` (default `local`)
+* `POSTGRES_DB` (default `appdb`)
+
+---
+
+## Build & Run (local/dev)
+
+### 1) Build
+
+```bash
+docker build -t fastapi-postgres-service .
+```
+
+### 2) Run (foreground)
+
+```bash
+docker run --rm -it  -p 8000:8000  -p 5432:5432  --name fpsvc  --env-file .env  fastapi-postgres-service
+```
+
+You should see logs like:
+
+```
+🚀 Starting Postgres cluster 17/main...
+✅ Postgres is ready
+CREATE ROLE
+CREATE DATABASE
+🔗 DATABASE_URL=postgresql://app:local@127.0.0.1:5432/appdb
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+### 3) Open the app
+
+* UI: [http://localhost:8000/](http://localhost:8000/)
+* Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## API quickstart
+
+### Kick off a run
+
+```bash
+curl -X POST http://localhost:8000/generate_report \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Large Language Models for scientific discovery", "model":"openai:gpt-4o"}'
+# -> {"task_id": "UUID..."}
+```
+
+### Poll progress
+
+```bash
+curl http://localhost:8000/task_progress/<TASK_ID>
+```
+
+### Final status + report
+
+```bash
+curl http://localhost:8000/task_status/<TASK_ID>
+```
+
+---
+
+## Troubleshooting
+
+**I open [http://localhost:8000](http://localhost:8000) and see nothing / errors**
+
+* Confirm `templates/index.html` exists inside the container:
+
+  ```bash
+  docker exec -it fpsvc bash -lc "ls -l /app/templates && ls -l /app/static || true"
+  ```
+* Watch logs while you load the page:
+
+  ```bash
+  docker logs -f fpsvc
+  ```
+
+**Container asks for a Postgres password on startup**
+
+* The entrypoint uses **UNIX socket + peer auth** for admin tasks (no password).
+  Ensure you’re not calling `psql -h 127.0.0.1 -U postgres` in the script—use:
+
+  ```bash
+  su -s /bin/bash postgres -c "psql -c '...'"
+  ```
+
+**`DATABASE_URL not set` error**
+
+* The entrypoint exports a default DSN. If you overrode it, ensure it’s valid:
+
+  ```
+  postgresql://<user>:<password>@<host>:<port>/<database>
+  ```
+
+**Tables disappear on restart**
+
+* In your `main.py` you call `Base.metadata.drop_all(...)` on startup.
+  Comment it out or guard with an env flag:
+
+  ```python
+  if os.getenv("RESET_DB_ON_STARTUP") == "1":
+      Base.metadata.drop_all(bind=engine)
+  ```
+
+**Tavily / arXiv / Wikipedia errors**
+
+* Provide `TAVILY_API_KEY` and ensure network access, provide in the root dir and `.env` file as follows:
+```
+# OpenAI API Key
+OPENAI_API_KEY=your-open-api-key
+TAVILY_API_KEY=your-tavily-api-key
+```
+
+* Wikipedia rate limits sometimes; try later or handle exceptions gracefully.
+
+---
+
+## Development tips
+
+* **Hot reload** (optional): For dev, you can run Uvicorn with `--reload` if you mount your code:
+
+  ```bash
+  docker run --rm -it -p 8000:8000 -p 5432:5432 \
+    -v "$PWD":/app \
+    --name fpsvc fastapi-postgres-service \
+    bash -lc "pg_ctlcluster \$(psql -V | awk '{print \$3}' | cut -d. -f1) main start && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+  ```
+
+* **Connect to DB from host:**
+
+  ```bash
+  psql "postgresql://app:local@localhost:5432/appdb"
+  ```
+
+---
